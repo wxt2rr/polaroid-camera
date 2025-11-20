@@ -48,12 +48,12 @@
         .ui-btn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ui-border); }
         #editBtn { background: #fffdf0; }
 
-        /* ==================== 左侧滤镜 & 滑动条 (升级版) ==================== */
+        /* ==================== 左侧滤镜 & 滑动条 ==================== */
         .controls-wrapper {
             position: absolute; left: 30px; top: 50%; transform: translateY(-50%);
             display: flex; align-items: center; gap: 15px; z-index: 50;
-            height: 400px; /* 给容器一个固定区域 */
-            pointer-events: none; /* 让 wrapper 不阻挡点击，子元素开启点击 */
+            height: 400px; /* 容器限高 */
+            pointer-events: none; /* 穿透点击，子元素开启 */
         }
 
         .controls {
@@ -63,26 +63,31 @@
             border: 2px solid var(--ui-border);
             box-shadow: 5px 5px 0 rgba(0,0,0,0.1);
             
-            /* === 核心修改：滚动逻辑 === */
-            max-height: 340px; /* 限制高度，大约显示 5 个 */
-            overflow-y: auto;  /* 开启纵向滚动 */
-            /* 隐藏滚动条 (拟物风格不需要丑陋的滚动条) */
+            max-height: 340px;
+            overflow-y: auto; 
             scrollbar-width: none; /* Firefox */
-            -ms-overflow-style: none; /* IE/Edge */
+            -ms-overflow-style: none; /* IE */
+
+            /* === 核心升级：上下透明渐变遮罩 === */
+            /* 这会让列表顶部和底部出现淡出效果，提示用户可以滚动 */
+            -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 5%, black 95%, transparent 100%);
+            mask-image: linear-gradient(to bottom, transparent 0%, black 5%, black 95%, transparent 100%);
+            /* 增加一点内边距防止内容被遮太狠 */
+            padding-top: 15px; padding-bottom: 15px; 
         }
-        /* Chrome/Safari 隐藏滚动条 */
         .controls::-webkit-scrollbar { display: none; }
 
         .filter-btn {
-            width: 50px; height: 50px; min-height: 50px; /* 防止压缩 */
+            width: 50px; height: 50px; min-height: 50px;
             border-radius: 12px; border: 2px solid #eee;
             background: #fff; font-size: 28px; cursor: pointer;
             transition: all 0.2s; display: flex; justify-content: center; align-items: center;
+            flex-shrink: 0; /* 防止被挤压 */
         }
         .filter-btn.active { border-color: #e8a89b; background: #fff0ee; transform: scale(1.05); }
         .filter-btn:hover { background: #fafafa; }
 
-        /* 尺寸调节滑块面板 */
+        /* 尺寸调节面板 */
         .slider-panel {
             pointer-events: auto;
             background: white; padding: 15px 10px; border-radius: 15px;
@@ -96,7 +101,6 @@
             font-size: 12px; color: #666; font-weight: bold; margin-bottom: 10px; letter-spacing: 2px;
         }
         
-        /* Range Slider 样式 hack */
         .range-wrapper { position: relative; width: 20px; height: 100px; display: flex; justify-content: center; align-items: center; }
         input[type=range] {
             -webkit-appearance: none; width: 100px; height: 6px;
@@ -263,8 +267,7 @@
             .ui-btn { font-size: 0.8rem; padding: 6px 12px; }
             
             .controls-wrapper { left: 10px; top: 80px; transform: none; height: 300px; }
-            /* 移动端稍微调整列表高度 */
-            .controls { padding: 5px; gap: 8px; max-height: 250px; }
+            .controls { padding: 10px 5px; gap: 8px; max-height: 250px; }
             .filter-btn { width: 40px; height: 40px; font-size: 20px; min-height: 40px; }
             
             .slider-panel { height: 130px; }
@@ -373,7 +376,15 @@
         const sizeSlider = document.getElementById('sizeSlider');
         const sliderPanel = document.getElementById('sizeSliderPanel');
 
-        // 滑块监听
+        // 监听全局点击，实现点击空白隐藏滑块
+        document.addEventListener('click', (e) => {
+            const wrapper = document.querySelector('.controls-wrapper');
+            // 如果点击的目标不在左侧控制区域内，则隐藏滑块
+            if (!wrapper.contains(e.target)) {
+                sliderPanel.style.display = 'none';
+            }
+        });
+
         sizeSlider.addEventListener('input', (e) => {
             emojiScale = parseFloat(e.target.value);
         });
@@ -418,11 +429,11 @@
                 const y = nose.y * canvas.height;
                 const faceWidth = Math.abs(right.x - left.x) * canvas.width;
                 
-                // 滑块控制尺寸
                 const size = faceWidth * emojiScale; 
 
                 let angle = Math.atan2(right.y - left.y, right.x - left.x);
-                angle = -angle; 
+                // === 核心修复：移除 angle = -angle，让旋转方向正确跟随头部 ===
+                // angle = -angle; // 此行代码已删除，解决反向问题
 
                 ctx.translate(x, y);
                 ctx.rotate(angle);
