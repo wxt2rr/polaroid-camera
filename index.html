@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Polaroid Camera Pro</title>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Gochi+Hand&display=swap" rel="stylesheet">
+    
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils@0.6/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4/face_mesh.js" crossorigin="anonymous"></script>
+
+    <style>
+        :root {
+            --bg-color: #dcdcdc;
+            --camera-body: #fdf6e3; 
+            --camera-dark: #e8dfc8;
+            --lens-ring: #e8a89b;
+            --ui-border: #333;
+        }
+
+        * { box-sizing: border-box; user-select: none; outline: none; }
+
+        body {
+            margin: 0; height: 100vh;
+            background-color: var(--bg-color);
+            background-image: radial-gradient(#bfbfbf 1px, transparent 1px);
+            background-size: 20px 20px;
+            font-family: 'Segoe UI', sans-serif;
+            overflow: hidden;
+            display: flex; align-items: center;
+        }
+
+        /* ==================== 顶部 UI ==================== */
+        .top-actions {
+            position: absolute; top: 20px; right: 30px;
+            display: flex; gap: 15px; z-index: 2000;
+        }
+        .ui-btn {
+            background: #fff; padding: 10px 20px; border-radius: 30px;
+            border: 2px solid var(--ui-border); font-weight: bold; cursor: pointer;
+            font-family: 'Microsoft YaHei', sans-serif; font-size: 1rem;
+            box-shadow: 3px 3px 0 var(--ui-border); transition: all 0.2s;
+        }
+        .ui-btn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ui-border); }
+        .ui-btn:hover { background: #fefefe; }
+        #editBtn { background: #fffdf0; }
+
+        /* ==================== 左侧滤镜 ==================== */
+        .controls {
+            position: absolute; left: 30px; top: 50%; transform: translateY(-50%);
+            display: flex; flex-direction: column; gap: 15px; z-index: 50;
+            background: white; padding: 15px; border-radius: 20px;
+            border: 2px solid var(--ui-border);
+            box-shadow: 5px 5px 0 rgba(0,0,0,0.1);
+        }
+        .filter-btn {
+            width: 60px; height: 60px; border-radius: 15px; border: 2px solid #eee;
+            background: #fff; font-size: 35px; cursor: pointer;
+            transition: all 0.2s; display: flex; justify-content: center; align-items: center;
+        }
+        .filter-btn:hover { transform: scale(1.1); background: #fefefe; }
+        .filter-btn.active { border-color: #e8a89b; background: #fff0ee; transform: scale(1.1); }
+
+        /* ==================== 文本编辑弹窗 ==================== */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5); backdrop-filter: blur(3px);
+            z-index: 5000; display: none; justify-content: center; align-items: center;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal-box {
+            background: #fff; width: 400px; padding: 30px;
+            border-radius: 20px; border: 3px solid var(--ui-border);
+            box-shadow: 10px 10px 0 rgba(0,0,0,0.2);
+            font-family: 'Microsoft YaHei', sans-serif; text-align: center;
+            transform: rotate(-2deg);
+        }
+        .hand-input {
+            width: 100%; border: none; border-bottom: 2px dashed #333;
+            font-family: 'Gochi Hand', cursive; font-size: 1.5rem;
+            padding: 10px; text-align: center; color: #d68c7e;
+            background: transparent; margin-bottom: 30px;
+        }
+        .modal-actions { display: flex; justify-content: space-around; }
+        .modal-btn {
+            padding: 8px 25px; font-size: 1rem; border-radius: 10px; cursor: pointer;
+            border: 2px solid #333; background: #fff; box-shadow: 3px 3px 0 #ccc;
+        }
+        .btn-confirm { background: #d68c7e; color: white; box-shadow: 3px 3px 0 #333; }
+
+        /* ==================== 相机主体 ==================== */
+        .camera-wrapper {
+            position: relative; margin-left: 150px;
+            width: 360px; height: 450px;
+        }
+        .texture-plastic {
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
+        }
+        .camera-body-base {
+            position: absolute; bottom: 0; width: 360px; height: 360px;
+            background-color: var(--camera-body); border-radius: 60px;
+            box-shadow: 20px 20px 50px rgba(0,0,0,0.2), inset -5px -5px 15px rgba(0,0,0,0.1), inset 2px 2px 5px rgba(255,255,255,0.8);
+            z-index: 10;
+        }
+        .printer-slot {
+            position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
+            width: 240px; height: 20px; background: #1a1a1a; border-radius: 4px; z-index: 15;
+            box-shadow: inset 0 2px 5px #000;
+        }
+        .camera-front-panel {
+            position: absolute; bottom: 0; width: 360px; height: 360px;
+            background: linear-gradient(135deg, var(--camera-body) 0%, var(--camera-dark) 100%);
+            border-radius: 60px; border: 1px solid rgba(255,255,255,0.4);
+            box-shadow: inset 4px 4px 10px rgba(255,255,255,0.9), inset -4px -4px 10px rgba(0,0,0,0.1), 0 -2px 5px rgba(0,0,0,0.1);
+            z-index: 20; display: flex; justify-content: center; align-items: center;
+        }
+
+        /* 镜头与视频 */
+        .lens-wrapper {
+            position: relative; width: 240px; height: 240px;
+            background: repeating-linear-gradient(45deg, #ddd, #ddd 2px, #eee 2px, #eee 4px);
+            border-radius: 50%; display: flex; justify-content: center; align-items: center;
+            margin-top: 40px; box-shadow: 8px 8px 20px rgba(0,0,0,0.2), inset 2px 2px 5px rgba(255,255,255,1);
+        }
+        .lens-ring-pink {
+            width: 200px; height: 200px; 
+            background: radial-gradient(circle at 30% 30%, #f0dcd8 0%, var(--lens-ring) 80%);
+            border-radius: 50%; display: flex; justify-content: center; align-items: center;
+            border: 2px solid rgba(255,255,255,0.5); box-shadow: inset 5px 5px 15px rgba(0,0,0,0.1), 0 5px 15px rgba(0,0,0,0.15);
+        }
+        .lens-glass {
+            width: 140px; height: 140px; background: #111;
+            border-radius: 50%; overflow: hidden; position: relative;
+            border: 6px solid #222; box-shadow: inset 0 0 20px #000, inset 5px 5px 10px rgba(255,255,255,0.1);
+        }
+        .lens-glass::after {
+            content: ''; position: absolute; top: 20px; right: 30px;
+            width: 30px; height: 20px; background: rgba(255,255,255,0.1);
+            border-radius: 50%; transform: rotate(45deg); pointer-events: none;
+        }
+
+        /* 核心修复：Canvas不再使用CSS翻转，改用JS数据翻转 */
+        #arCanvas { width: 100%; height: 100%; object-fit: cover; }
+        #sourceVideo { position: absolute; top: 0; left: 0; opacity: 0; pointer-events: none; width: 1px; height: 1px; }
+
+        .camera-features {
+            position: absolute; top: 40px; left: 40px; right: 40px;
+            display: flex; justify-content: space-between;
+        }
+        .flash {
+            width: 80px; height: 50px; background: #2a2a2a;
+            border-radius: 10px; border: 3px solid #ccc; position: relative; overflow: hidden;
+            box-shadow: inset 0 0 10px #000, 2px 2px 5px rgba(0,0,0,0.2);
+            background-image: repeating-linear-gradient(90deg, transparent, transparent 4px, rgba(255,255,255,0.1) 4px, rgba(255,255,255,0.1) 5px);
+        }
+        .viewfinder {
+            width: 50px; height: 50px; background: #111;
+            border-radius: 50%; border: 4px solid #333;
+            box-shadow: inset 5px 5px 10px rgba(255,255,255,0.1); position: relative;
+        }
+        .viewfinder::before {
+            content: ''; position: absolute; top: 10px; left: 10px;
+            width: 15px; height: 15px; background: rgba(255,255,255,0.1); border-radius: 50%;
+        }
+
+        /* 修复：快门按钮动效 */
+        @keyframes pulse-btn {
+            0% { box-shadow: inset 2px 2px 5px rgba(255,255,255,0.4), 0 0 0 0 rgba(214, 140, 126, 0.7); }
+            70% { box-shadow: inset 2px 2px 5px rgba(255,255,255,0.4), 0 0 0 10px rgba(214, 140, 126, 0); }
+            100% { box-shadow: inset 2px 2px 5px rgba(255,255,255,0.4), 0 0 0 0 rgba(214, 140, 126, 0); }
+        }
+        .shutter-btn {
+            position: absolute; top: 180px; left: 20px;
+            width: 60px; height: 60px; 
+            background: radial-gradient(circle at 40% 40%, #e89b8e 0%, #d68c7e 100%);
+            border-radius: 50%; border: none; cursor: pointer; z-index: 30;
+            /* 呼吸动画 */
+            animation: pulse-btn 2s infinite;
+        }
+        .shutter-btn:active { 
+            transform: scale(0.95); 
+            animation: none; /* 点击时暂停呼吸 */
+            box-shadow: inset 4px 4px 12px rgba(0,0,0,0.4);
+        }
+
+        /* 修复：局部闪光特效 (仅在镜头内) */
+        .lens-flash-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #fff; opacity: 0; border-radius: 50%; pointer-events: none;
+            transition: opacity 0.1s ease-out; z-index: 100;
+        }
+
+        /* ==================== 照片 ==================== */
+        .desk-area { flex-grow: 1; height: 100%; position: relative; z-index: 5; }
+
+        .polaroid {
+            position: absolute; width: 220px; padding: 15px 15px 40px 15px;
+            background: #fff; box-shadow: 5px 5px 20px rgba(0,0,0,0.15);
+            transform-origin: center; cursor: grab;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.03'/%3E%3C/svg%3E");
+        }
+        
+        .polaroid-save-btn {
+            position: absolute; top: -12px; right: -12px;
+            width: 30px; height: 30px; background: #333; color: #fff;
+            border-radius: 50%; display: flex; justify-content: center; align-items: center;
+            font-size: 16px; cursor: pointer; border: 2px solid #fff;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.3); opacity: 0; transition: opacity 0.2s, transform 0.2s;
+            z-index: 10;
+        }
+        .polaroid:hover .polaroid-save-btn { opacity: 1; }
+        .polaroid-save-btn:hover { transform: scale(1.1); background: #d68c7e; }
+
+        .polaroid img {
+            width: 100%; height: 220px; object-fit: cover;
+            background: #eee; filter: contrast(1.1) sepia(0.2); pointer-events: none;
+            border: 1px solid #eee;
+        }
+        .polaroid-text {
+            margin-top: 15px; font-family: 'Gochi Hand', cursive;
+            color: #333; text-align: center; font-size: 1.2rem; pointer-events: none;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .date-stamp {
+            font-size: 0.8rem; color: #888; text-align: right; margin-top: 5px; font-family: monospace;
+        }
+        .polaroid.printing {
+            left: 50% !important; top: 100px !important; 
+            transform: translateX(-50%) scale(0.9);
+            z-index: 12 !important; box-shadow: none;
+            transition: top 3s linear, transform 3s ease-out;
+        }
+        .polaroid.printed { top: -150px !important; transform: translateX(-50%) scale(1); }
+        
+        .hide-in-shot { display: none !important; }
+
+        #loadingMask {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.95); z-index: 10000;
+            display: flex; flex-direction: column; justify-content: center; align-items: center; 
+            font-family: 'Segoe UI', sans-serif; text-align: center;
+        }
+        #logOutput { margin-top: 20px; color: #888; font-size: 0.9rem; font-family: monospace; }
+    </style>
+</head>
+<body>
+
+    <div id="loadingMask">
+        <h2>正在启动相机 AI...</h2>
+        <p>首次加载模型可能需要10-20秒</p>
+        <div id="logOutput">初始化中...</div>
+    </div>
+
+    <div class="top-actions">
+        <button class="ui-btn" id="editBtn">✎ 修改文本</button>
+        <button class="ui-btn" id="downloadDeskBtn">💾 保存桌面</button>
+    </div>
+
+    <div class="modal-overlay" id="textModal">
+        <div class="modal-box">
+            <div class="modal-title">输入你的文案</div>
+            <input type="text" id="captionInput" class="hand-input" maxlength="20" value="May I Meet You">
+            <div class="modal-actions">
+                <button class="modal-btn" id="cancelTextBtn">取消</button>
+                <button class="modal-btn btn-confirm" id="saveTextBtn">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <div class="filter-btn active" onclick="setFilter(null)">🚫</div>
+        <div class="filter-btn" onclick="setFilter('🐶')">🐶</div>
+        <div class="filter-btn" onclick="setFilter('🐱')">🐱</div>
+    </div>
+
+    <div class="camera-wrapper" id="cameraWrapper">
+        <div class="camera-body-base texture-plastic"></div>
+        <div class="printer-slot"></div>
+        
+        <div class="camera-front-panel texture-plastic">
+            <div class="camera-features">
+                <div class="flash"></div>
+                <div class="viewfinder"></div>
+            </div>
+            <div class="lens-wrapper">
+                <div class="lens-ring-pink">
+                    <div class="lens-glass">
+                        <div class="lens-flash-overlay" id="localFlash"></div>
+                        
+                        <canvas id="arCanvas" width="400" height="400"></canvas>
+                        <video id="sourceVideo" playsinline></video>
+                    </div>
+                </div>
+            </div>
+            <button class="shutter-btn" id="shutterBtn" title="点击拍照"></button>
+        </div>
+    </div>
+
+    <div class="desk-area" id="deskArea"></div>
+
+    <script>
+        const logDiv = document.getElementById('logOutput');
+        function log(msg) { console.log(msg); if(logDiv) logDiv.innerText = msg; }
+
+        let activeEmoji = null;
+        let currentCaption = "May I Meet You";
+        let zIndexCounter = 100;
+
+        const video = document.getElementById('sourceVideo');
+        const canvas = document.getElementById('arCanvas');
+        const ctx = canvas.getContext('2d');
+        const loadingMask = document.getElementById('loadingMask');
+        const cameraWrapper = document.getElementById('cameraWrapper');
+        const deskArea = document.getElementById('deskArea');
+
+        // 初始化
+        async function init() {
+            try {
+                log("加载 FaceMesh 库...");
+                const faceMesh = new FaceMesh({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4/${file}`});
+                faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+                faceMesh.onResults(onResults);
+
+                log("请求摄像头权限...");
+                const camera = new Camera(video, {
+                    onFrame: async () => { await faceMesh.send({image: video}); },
+                    width: 400, height: 400
+                });
+
+                await camera.start();
+                log("摄像头启动成功！");
+                loadingMask.style.display = 'none';
+            } catch (err) {
+                console.error(err);
+                log("错误: " + err.message);
+                alert("启动失败，请检查网络或使用 Live Server 运行。");
+            }
+        }
+        init();
+
+        // 核心渲染：修复镜像问题
+        function onResults(results) {
+            ctx.save();
+            // 1. 水平翻转画布，实现“镜面”效果
+            ctx.translate(canvas.width, 0);
+            ctx.scale(-1, 1);
+            
+            // 2. 绘制视频帧（现在在 Canvas 数据层面上就是翻转的了）
+            ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
+            // 3. 绘制 Emoji
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0 && activeEmoji) {
+                const landmarks = results.multiFaceLandmarks[0];
+                const nose = landmarks[1];
+                const left = landmarks[234];
+                const right = landmarks[454];
+
+                // 由于画布已经翻转，MediaPipe 的坐标系（基于原图）需要适配
+                // MediaPipe 原图左眼 x=0.3，翻转后应该出现在视觉右侧
+                // 但因为我们翻转了 context，直接画在 0.3 处，视觉上就在右侧 (width - x)
+                // 所以这里直接使用原始坐标即可！Context 的翻转会帮我们处理好位置。
+                
+                const x = nose.x * canvas.width;
+                const y = nose.y * canvas.height;
+                const faceWidth = Math.abs(right.x - left.x) * canvas.width;
+                const size = faceWidth * 3.0; 
+                
+                // 角度计算需要反转一下，因为X轴被翻转了
+                // 原本: atan2(dy, dx)
+                // 翻转后 dx 变反了，所以角度是 mirrored
+                let angle = Math.atan2(right.y - left.y, right.x - left.x);
+                angle = -angle; // 简单的反转角度适配翻转坐标系
+
+                ctx.translate(x, y);
+                ctx.rotate(angle);
+                ctx.font = `${size}px "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                
+                // 文字也需要纠正，否则 emoji 会被镜像
+                ctx.scale(-1, 1); 
+                ctx.fillText(activeEmoji, 0, 0);
+            }
+            ctx.restore();
+        }
+
+        window.setFilter = (emoji) => {
+            activeEmoji = emoji;
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                if (btn.innerText.includes(emoji || '🚫')) btn.classList.add('active');
+                else btn.classList.remove('active');
+            });
+        }
+
+        // 文本编辑
+        const modal = document.getElementById('textModal');
+        const captionInput = document.getElementById('captionInput');
+        const saveTextBtn = document.getElementById('saveTextBtn');
+        const cancelTextBtn = document.getElementById('cancelTextBtn');
+        const editBtn = document.getElementById('editBtn');
+
+        editBtn.addEventListener('click', () => {
+            captionInput.value = currentCaption; 
+            modal.classList.add('show');
+            captionInput.focus();
+        });
+        function closeModal() { modal.classList.remove('show'); }
+        saveTextBtn.addEventListener('click', () => {
+            if(captionInput.value.trim()) currentCaption = captionInput.value.trim();
+            closeModal();
+        });
+        cancelTextBtn.addEventListener('click', closeModal);
+        modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+        // 拍照
+        document.getElementById('shutterBtn').addEventListener('click', () => {
+            // 修复：局部闪光
+            const flash = document.getElementById('localFlash');
+            flash.style.opacity = 1;
+            setTimeout(() => flash.style.opacity = 0, 100); // 快速闪烁
+
+            const imgUrl = canvas.toDataURL('image/jpeg', 0.95);
+            createPolaroid(imgUrl);
+        });
+
+        function createPolaroid(imgUrl) {
+            const div = document.createElement('div');
+            div.className = 'polaroid printing';
+            
+            const now = new Date();
+            const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')}`;
+
+            const saveBtn = document.createElement('div');
+            saveBtn.className = 'polaroid-save-btn';
+            saveBtn.innerHTML = '⬇';
+            saveBtn.title = '下载这张照片';
+            saveBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                downloadSinglePolaroid(div);
+            });
+
+            div.innerHTML = `
+                <img src="${imgUrl}" draggable="false">
+                <div class="polaroid-text">${currentCaption}</div>
+                <div class="date-stamp">${dateStr}</div>
+            `;
+            div.appendChild(saveBtn);
+
+            cameraWrapper.appendChild(div);
+            setTimeout(() => { div.classList.add('printed'); }, 100);
+            setTimeout(() => {
+                const rect = div.getBoundingClientRect();
+                div.classList.remove('printing', 'printed');
+                div.style.position = 'absolute';
+                div.style.left = (rect.left + window.scrollX) + 'px';
+                div.style.top = (rect.top + window.scrollY) + 'px';
+                div.style.transform = `rotate(${Math.random() * 10 - 5}deg)`;
+                div.style.zIndex = zIndexCounter++;
+                deskArea.appendChild(div);
+                makeDraggable(div);
+            }, 3100);
+        }
+
+        // 修复：下载单张照片逻辑（扶正）
+        function downloadSinglePolaroid(element) {
+            const btn = element.querySelector('.polaroid-save-btn');
+            btn.classList.add('hide-in-shot'); 
+
+            // 1. 记录当前的旋转状态
+            const originalTransform = element.style.transform;
+            
+            // 2. 临时移除旋转，让它变正
+            // 保持 scale(1) 且 rotate(0)
+            element.style.transform = 'scale(1) rotate(0deg)';
+            
+            // 3. 截图
+            html2canvas(element, { 
+                backgroundColor: null, // 透明背景
+                scale: 2, 
+                useCORS: true
+            }).then(canvas => {
+                // 4. 恢复旋转状态
+                element.style.transform = originalTransform;
+                
+                const link = document.createElement('a');
+                link.download = `polaroid_${Date.now()}.png`;
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+                btn.classList.remove('hide-in-shot');
+            });
+        }
+
+        function makeDraggable(element) {
+            let isDragging = false;
+            let startX, startY, initialLeft, initialTop;
+            element.addEventListener('mousedown', (e) => {
+                if(e.target.classList.contains('polaroid-save-btn')) return;
+                isDragging = true;
+                element.style.zIndex = zIndexCounter++;
+                startX = e.clientX; startY = e.clientY;
+                initialLeft = element.offsetLeft; initialTop = element.offsetTop;
+                element.style.cursor = 'grabbing';
+            });
+            window.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                e.preventDefault();
+                const dx = e.clientX - startX;
+                const dy = e.clientY - startY;
+                element.style.left = `${initialLeft + dx}px`;
+                element.style.top = `${initialTop + dy}px`;
+            });
+            window.addEventListener('mouseup', () => { isDragging = false; element.style.cursor = 'grab'; });
+        }
+
+        document.getElementById('downloadDeskBtn').addEventListener('click', () => {
+            const uiElements = [document.querySelector('.top-actions'), document.querySelector('.controls')];
+            const photoBtns = document.querySelectorAll('.polaroid-save-btn');
+            
+            uiElements.forEach(el => el.classList.add('hide-in-shot'));
+            photoBtns.forEach(el => el.classList.add('hide-in-shot'));
+
+            html2canvas(document.body, { backgroundColor: null, scale: window.devicePixelRatio }).then(canvas => {
+                const link = document.createElement('a');
+                link.download = 'my-polaroid-desk.png';
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+                uiElements.forEach(el => el.classList.remove('hide-in-shot'));
+                photoBtns.forEach(el => el.classList.remove('hide-in-shot'));
+            });
+        });
+    </script>
+</body>
+</html>
